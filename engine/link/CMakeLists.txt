@@ -18,6 +18,7 @@ SET ( FILES
   reidemeister-tangle.cpp
   rewrite.cpp
   sig.cpp
+  sig-tangle.cpp
   simplify.cpp
   tangle.cpp
   )

@@ -204,7 +204,7 @@ Tangle::Tangle(const Link& knot) : type_(TANGLE_HORIZONTAL) {
     end_[1][1] = exitR;
 }
 
-Tangle::Tangle(const Tangle& cloneMe) : type_(cloneMe.type_) {
+Tangle::Tangle(const Tangle& cloneMe, bool cloneProps) : type_(cloneMe.type_) {
     crossings_.reserve(cloneMe.crossings_.size());
     for (Crossing* c : cloneMe.crossings_)
         crossings_.push_back(new Crossing(c->sign()));
@@ -548,6 +548,139 @@ void Tangle::rerouteFrom(const StrandRef& oldSrc, const StrandRef& newSrc) {
             std::cerr << "rerouteFrom(): inconsistent end/prev/next arrays";
     } else {
         dest.crossing()->prev_[dest.strand()] = newSrc;
+    }
+}
+
+std::pair<ArcEndpoint, ArcEndpoint> Tangle::arcEndpoints(const StrandRef& arc) {
+    StrandRef* fromRef;
+    StrandRef to;
+    StrandRef* toRef;
+    if (arc) {
+        fromRef = &arc.crossing()->next_[arc.strand()];
+        to = arc.next();
+    } else {
+        fromRef = &end_[arc.strand()][0];
+        to = end_[arc.strand()][0];
+    }
+    if (to) {
+        toRef = &to.crossing()->prev_[to.strand()];
+    } else {
+        if (arc) {
+            if (end_[0][1] == arc) {
+                toRef = &end_[0][1];
+            } else if (end_[1][1] == arc) { // must be true
+                toRef = &end_[1][1];
+            } else {
+                std::cerr << "r1(): inconsistent end/prev/next arrays";
+            }
+        } else {
+            toRef = &end_[arc.strand()][1];
+        }
+    }
+    return std::make_pair((ArcEndpoint){arc, fromRef}, (ArcEndpoint){to, toRef});
+}
+
+StrandRef Tangle::nextArc(const StrandRef& arc) {
+    if (!arc) {
+        if (end_[arc.strand()][0]) {
+            return end_[arc.strand()][0];
+        } else {
+            return StrandRef(nullptr, arc.strand());
+        }
+    }
+    StrandRef s = arc.next();
+    if (s) {
+        return s;
+    } else {
+        if (arc) {
+            int strand = end_[0][1] == arc ? 0 : 1;
+            return StrandRef(nullptr, strand);
+        } else {
+            return StrandRef(nullptr, arc.strand());
+        }
+    }
+}
+
+StrandRef Tangle::prevArc(const StrandRef& arc) {
+    if (!arc) {
+        std::cerr << "Tangle::prevArc(): arc already at start of strand";
+        return arc;
+    }
+    StrandRef s = arc.prev();
+    if (s) {
+        return s;
+    } else {
+        int strand = end_[0][0] == arc ? 0 : 1;
+        return StrandRef(nullptr, strand);
+    }
+}
+
+std::pair<StrandRef, int> Tangle::nextArcInCell(const StrandRef& arc, int side) {
+    if (!side) {
+        // Arc points counterclockwise around the 2-cell.
+        StrandRef newArc = nextArc(arc);
+        if (!newArc) {
+            // Reached the end of a strand, go around the edge of the
+            // surrounding 3-ball.
+            if (newArc.strand() == 0) {
+                if (type_ == '-') {
+                    return std::make_pair(StrandRef(nullptr, 0), 0);
+                } else { // type == '|' or 'x'
+                    if (end_[1][1]) {
+                        return std::make_pair(end_[1][1], 1);
+                    } else {
+                        return std::make_pair(StrandRef(nullptr, 1), 1);
+                    }
+                }
+            } else {
+                if (type_ == '-') {
+                    return std::make_pair(end_[0][1], 1);
+                } else if (type_ == '|') {
+                    return std::make_pair(StrandRef(nullptr, 1), 0);
+                } else { // type_ == 'x'
+                    return std::make_pair(StrandRef(nullptr, 0), 0);
+                }
+            }
+        } else {
+            newArc.jump();
+            int newSide = (0 != newArc.strand()) ^ (newArc.crossing()->sign() > 0);
+            if (newSide) {
+                newArc = prevArc(newArc);
+            }
+            return std::make_pair(newArc, newSide);
+        }
+    } else {
+        // Arc points clockwise around the 2-cell.
+        if (!arc) {
+            // At start of strand, go around the edge of the surrounding 3-ball.
+            if (arc.strand() == 0) {
+                if (type_ == '|') {
+                    return std::make_pair(end_[0][1], 1);
+                } else { // type == '-' or 'x'
+                    return std::make_pair(StrandRef(nullptr, 1), 0);
+                }
+            } else {
+                if (type_ == '-') {
+                    if (end_[1][1]) {
+                        return std::make_pair(end_[1][1], 1);
+                    } else {
+                        return std::make_pair(StrandRef(nullptr, 1), 1);
+                    }
+                } else if (type_ == '|') {
+                    return std::make_pair(StrandRef(nullptr, 0), 0);
+                } else { // type_ == 'x'
+                    return std::make_pair(end_[0][1], 1);
+                }
+            }
+        } else {
+            StrandRef newArc = arc;
+            newArc.jump();
+            int newSide = (0 == newArc.strand()) ^ (newArc.crossing()->sign() > 0);
+            if (newSide) {
+                newArc = prevArc(newArc);
+            }
+            return std::make_pair(newArc, newSide);
+        }
     }
 }
 

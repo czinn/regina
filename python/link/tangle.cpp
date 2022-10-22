@@ -31,11 +31,13 @@
  **************************************************************************/
 
 #include "../pybind11/pybind11.h"
+#include "../pybind11/functional.h"
 #include "../pybind11/stl.h"
 #include "link/tangle.h"
 #include "../helpers.h"
 
 using pybind11::overload_cast;
+using regina::python::GILCallbackManager;
 using regina::Crossing;
 using regina::StrandRef;
 using regina::Tangle;
@@ -67,7 +69,13 @@ void addTangle(pybind11::module_& m) {
         .def("negate", &Tangle::negate)
         .def("numClosure", &Tangle::numClosure)
         .def("denClosure", &Tangle::denClosure)
-        .def("r1", &Tangle::r1,
+        .def("r1", overload_cast<Crossing*, bool, bool>(&Tangle::r1),
+            pybind11::arg(),
+            pybind11::arg("check") = true,
+            pybind11::arg("perform") = true)
+        .def("r1", overload_cast<StrandRef, int, int, bool, bool>(&Tangle::r1),
+            pybind11::arg(),
+            pybind11::arg(),
             pybind11::arg(),
             pybind11::arg("check") = true,
             pybind11::arg("perform") = true)
@@ -79,11 +87,50 @@ void addTangle(pybind11::module_& m) {
             pybind11::arg(),
             pybind11::arg("check") = true,
             pybind11::arg("perform") = true)
+        .def("r2", overload_cast<StrandRef, int, StrandRef, int, bool, bool>(&Tangle::r2),
+            pybind11::arg(),
+            pybind11::arg(),
+            pybind11::arg(),
+            pybind11::arg(),
+            pybind11::arg("check") = true,
+            pybind11::arg("perform") = true)
+        .def("r3", overload_cast<Crossing*, int, bool, bool>(&Tangle::r3),
+            pybind11::arg(),
+            pybind11::arg(),
+            pybind11::arg("check") = true,
+            pybind11::arg("perform") = true)
+        .def("r3", overload_cast<StrandRef, int, bool, bool>(&Tangle::r3),
+            pybind11::arg(),
+            pybind11::arg(),
+            pybind11::arg("check") = true,
+            pybind11::arg("perform") = true)
         .def("simplifyToLocalMinimum", &Tangle::simplifyToLocalMinimum,
             pybind11::arg("perform") = true)
+        .def("simplifyExhaustive", &Tangle::simplifyExhaustive,
+            pybind11::arg("height") = 1,
+            pybind11::arg("nThreads") = 1,
+            pybind11::arg("tracker") = nullptr,
+            pybind11::call_guard<regina::python::GILScopedRelease>())
+        .def("rewrite", [](const Tangle& tangle, int height, int threads,
+                const std::function<bool(const std::string&, Tangle&&)>& action) {
+            if (threads == 1) {
+                return tangle.rewrite(height, 1, nullptr, action);
+            } else {
+                GILCallbackManager manager;
+                return tangle.rewrite(height, threads, nullptr,
+                    [&](const std::string& sig, Tangle&& tangle) -> bool {
+                        GILCallbackManager<>::ScopedAcquire acquire(manager);
+                        return action(sig, std::move(tangle));
+                    });
+            }
+        })
         .def("brief", overload_cast<>(&Tangle::brief, pybind11::const_))
         .def("orientedGauss",
             overload_cast<>(&Tangle::orientedGauss, pybind11::const_))
+        .def("tangleSig", &Tangle::tangleSig,
+            pybind11::arg("useReflection") = true,
+            pybind11::arg("useFlipping") = true)
+        .def_static("fromTangleSig", &Tangle::fromTangleSig)
         // In the following overloads, we define functions twice because
         // overload_cast gets confused between templated/non-templated variants.
         // Also: the versions that take a std::vector must come *last*,

@@ -83,6 +83,30 @@ bool Tangle::r1(Crossing* crossing, bool check, bool perform) {
     return true;
 }
 
+bool Tangle::r1(StrandRef arc, int side, int sign, bool check, bool perform) {
+    // The move is always able to be performed.
+    if (! perform) {
+        return true;
+    }
+
+    auto [from, to] = arcEndpoints(arc);
+
+    auto* c = new Crossing(sign);
+    // True if the strand goes from lower to upper in the twist.
+    int parity = (side == 0 && sign > 0) || (side == 1 && sign < 0);
+
+    *from.backref = StrandRef(c, !parity);
+    *to.backref = StrandRef(c, parity);
+    c->next_[parity] = to.strand;
+    c->prev_[!parity] = from.strand;
+    c->next_[!parity] = StrandRef(c, parity);
+    c->prev_[parity] = StrandRef(c, !parity);
+
+    crossings_.push_back(c);
+
+    return true;
+}
+
 bool Tangle::r2(StrandRef arc, bool check, bool perform) {
     if (! arc) {
         // The move cannot be performed.
@@ -206,6 +230,167 @@ bool Tangle::r2(StrandRef arc, bool check, bool perform) {
 
     delete arc.crossing();
     delete to.crossing();
+
+    return true;
+}
+
+bool Tangle::r2(StrandRef upperArc, int upperSide, StrandRef lowerArc,
+        int lowerSide, bool check, bool perform) {
+    if (check) {
+        if (upperArc == lowerArc) {
+            // Do two R1 moves instead.
+            return false;
+        }
+
+        // Ensure that the two given sides-of-arcs belong to the
+        // same 2-cell in the tangle diagram.
+        StrandRef arc = upperArc;
+        int side = upperSide;
+        while (true) {
+            // Move to the next edge of the boundary of this 2-cell.
+            auto [nextArc, nextSide] = nextArcInCell(arc, side);
+            arc = nextArc;
+            side = nextSide;
+            if (arc.crossing() == upperArc.crossing() && arc.strand() == upperArc.strand()) {
+                // We reached the upper arc again without finding the lower arc.
+                return false;
+            }
+            if (arc.crossing() == lowerArc.crossing() && arc.strand() == lowerArc.strand()) {
+                if (side == lowerSide) {
+                    break;
+                } else {
+                    // We found the lower arc, but the wrong side of it.
+                    return false;
+                }
+            }
+        }
+    }
+
+    // The move can be performed!
+    if (!perform) {
+        return true;
+    }
+
+    auto* pos = new Crossing(1);
+    auto* neg = new Crossing(-1);
+    Crossing* crossings[2] = {neg, pos};
+    auto [upperFrom, upperTo] = arcEndpoints(upperArc);
+    auto [lowerFrom, lowerTo] = arcEndpoints(lowerArc);
+
+    // Connect upper strand
+    *upperFrom.backref = crossings[!lowerSide]->upper();
+    crossings[!lowerSide]->prev_[1] = upperFrom.strand;
+    crossings[!lowerSide]->next_[1] = crossings[lowerSide]->upper();
+    crossings[lowerSide]->prev_[1] = crossings[!lowerSide]->upper();
+    *upperTo.backref = crossings[lowerSide]->upper();
+    crossings[lowerSide]->next_[1] = upperTo.strand;
+
+    // Connect lower strand
+    *lowerFrom.backref = crossings[upperSide]->lower();
+    crossings[upperSide]->prev_[0] = lowerFrom.strand;
+    crossings[upperSide]->next_[0] = crossings[!upperSide]->lower();
+    crossings[!upperSide]->prev_[0] = crossings[upperSide]->lower();
+    *lowerTo.backref = crossings[!upperSide]->lower();
+    crossings[!upperSide]->next_[0] = lowerTo.strand;
+
+    crossings_.push_back(pos);
+    crossings_.push_back(neg);
+
+    return true;
+}
+
+bool Tangle::r3(StrandRef arc, int side, bool check, bool perform) {
+    if (!arc) {
+        // The move cannot be performed.
+        // We should just return false, but only if check is true.
+        return !check;
+    }
+
+    // Find the three crossings at the vertices of the triangle, and
+    // determine whether the three edges of the triangle leave them in the
+    // forward or backward directions.
+    StrandRef s[4];
+    bool forward[4];
+
+    s[0] = arc;
+    forward[0] = true;
+
+    int i;
+    for (i = 1; i < 4; ++i) {
+        if (forward[i-1]) {
+            s[i] = s[i-1].next();
+            if (check && !s[i]) return false;
+            s[i].jump();
+
+            // forward[i] is true for (side, sign, strand):
+            // 0, +, 0
+            // 1, -, 0
+            // 0, -, 1
+            // 1, +, 1
+            if (s[i].crossing()->sign() > 0)
+                forward[i] = (side == s[i].strand());
+            else
+                forward[i] = (side != s[i].strand());
+        } else {
+            s[i] = s[i-1].prev();
+            if (check && !s[i]) return false;
+            s[i].jump();
+
+            // forward[i] is true for (side, sign, strand):
+            // 1, +, 0
+            // 0, -, 0
+            // 1, -, 1
+            // 0, +, 1
+            if (s[i].crossing()->sign() > 0)
+                forward[i] = (side != s[i].strand());
+            else
+                forward[i] = (side == s[i].strand());
+        }
+    }
+
+    if (check) {
+        if (s[3] != s[0] || forward[3] != forward[0])
+            return false;
+        if (s[0].crossing() == s[1].crossing() ||
+                s[1].crossing() == s[2].crossing() ||
+                s[0].crossing() == s[2].crossing())
+            return false;
+        if (s[0].strand() == s[1].strand() && s[1].strand() == s[2].strand())
+            return false;
+    }
+
+    if (! perform)
+        return true;
+
+    // Reorder the two crossings on each of the three edges.
+    StrandRef x, first, second, y;
+    for (i = 0; i < 3; ++i) {
+        if (forward[i]) {
+            first = s[i];
+            second = first.next();
+        } else {
+            second = s[i];
+            first = second.prev();
+        }
+
+        x = first.prev();
+        if (x == second) {
+            // This means that (first, second) is a 2-crossing cycle.
+            // Swapping the crossings will have no effect.
+            continue;
+        }
+        y = second.next();
+
+        // We have: x -> first -> second -> y
+        // We want: x -> second -> first -> y
+
+        rerouteTo(first, second);
+        rerouteFrom(second, first);
+        second.crossing()->next_[second.strand()] = first;
+        first.crossing()->next_[first.strand()] = y;
+        first.crossing()->prev_[first.strand()] = second;
+        second.crossing()->prev_[second.strand()] = x;
+    }
 
     return true;
 }

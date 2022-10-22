@@ -45,6 +45,18 @@
 namespace regina {
 
 /**
+ * Represents one end of an arc. \c strand is the strand at one end of the arc,
+ * and \c backref points to the outgoing StrandRef along that arc.
+ *
+ * Two \c ArcEndpoints \c a and \c b can be joined by setting *a.backref
+ * = b.strand and *b.backref = a.strand.
+ */
+struct ArcEndpoint {
+  StrandRef strand;
+  StrandRef* backref;
+};
+
+/**
  * Represents a 2-tangle in the 3-ball.  Regina does not allow closed
  * components in a tangle; in other words, a tangle in Regina is a
  * proper embedding of exactly two arcs in the 3-ball with the
@@ -177,6 +189,14 @@ class Tangle : public Output<Tangle> {
          * @param copy the tangle to copy.
          */
         Tangle(const Tangle& copy);
+        /**
+         * Constructs a new copy of the given tangle.
+         *
+         * @param copy the tangle to copy.
+         * @param cloneProps whether to copy the properties of the tangle
+         * (ignored for now as there are no properties)
+         */
+        Tangle(const Tangle& copy, bool cloneProps);
         /**
          * Moves the given tangle into this new tangle.
          * This is a fast (constant time) operation.
@@ -365,6 +385,14 @@ class Tangle : public Output<Tangle> {
          */
         StrandRef translate(const StrandRef& other) const;
 
+        /**
+         * Whether this tangle is empty. This is used only for compatibility
+         * with the retriangulator.
+         *
+         * @return \c false, as tangles are never empty.
+         */
+        bool isEmpty() const;
+
         /*@}*/
         /**
          * \name Editing
@@ -464,6 +492,40 @@ class Tangle : public Output<Tangle> {
          * this function always returns \c true.
          */
         bool r1(Crossing* crossing, bool check = true, bool perform = true);
+
+        /**
+         * Tests for and/or performs a type I Reidemeister move to add a
+         * crossing.
+         *
+         * The behaviour of this routine is identical to the r1()
+         * routine in the Link class; see Link::r1() for further details.
+         *
+         * If \a arc is a null reference, then the arc is interpreted as the
+         * arc starting from the first endpoint of the strand referred to by \c
+         * arc.strand().
+         *
+         * \pre If \a perform is \c true but \a check is \c false, then
+         * it must be known in advance that this move can be performed
+         * at the given location.
+         * \pre The given crossing is either a null pointer, or else some
+         * crossing in this tangle.
+         *
+         * @param arc identifies the arc of the tangle in which the new
+         * twist will be introduced, as described above.
+         * @param side 0 if the twist should be introduced on the left
+         * of the arc (when walking along the arc in the forward direction),
+         * or 1 if the twist should be introduced on the right of the arc.
+         * @param sign the sign of the new crossing that will be
+         * introduced as part of the twist; this must be +1 or -1.
+         * @param check \c true if we are to check whether the move can
+         * be performed at the given location.
+         * @param perform \c true if we should actually perform the move.
+         * @return If \a check is \c true, this function returns \c true
+         * if and only if the move can be performed.  If \a check is \c false,
+         * this function always returns \c true.
+         */
+        bool r1(StrandRef arc, int side, int sign, bool check = true, bool perform = true);
+
         /**
          * Tests for and/or performs a type II Reidemeister move to remove
          * two crossings.
@@ -516,6 +578,22 @@ class Tangle : public Output<Tangle> {
          * this function always returns \c true.
          */
         bool r2(Crossing* crossing, bool check = true, bool perform = true);
+        /**
+         * TODO czinn: Document
+         */
+        bool r2(StrandRef upperArc, int upperSide, StrandRef lowerArc, int
+            lowerSide, bool check, bool perform);
+
+        /**
+         * TODO czinn: Document
+         */
+        bool r3(StrandRef arc, int side, bool check = true,
+            bool perform = true);
+        /**
+         * TODO czinn: Document
+         */
+        bool r3(Crossing* crossing, int side, bool check = true,
+            bool perform = true);
 
         /**
          * Uses type I and II Reidemeister moves to reduce the tangle
@@ -540,6 +618,32 @@ class Tangle : public Output<Tangle> {
          * that it is capable of performing such a change.
          */
         bool simplifyToLocalMinimum(bool perform = true);
+
+        /**
+         * TODO czinn: Document
+         */
+        bool simplifyExhaustive(int height = 1, unsigned nThreads = 1,
+            ProgressTrackerOpen* tracker = nullptr);
+
+        /**
+         * TODO czinn: Document
+         */
+        template <typename Action, typename... Args>
+        bool rewrite(int height, unsigned nThreads,
+            ProgressTrackerOpen* tracker,
+            Action&& action, Args&&... args) const;
+
+        /**
+         * Finds the next arc walking counterclockwise around the 2-cell. This
+         * is useful for finding and validating R2 moves.
+         *
+         * @param arc An arc of the diagram.
+         * @param side 0 if the left side of the arc faces the 2-cell, 1 for
+         * the right side.
+         * @return The next arc around the 2-cell and the side of the arc
+         * facing the 2-cell, in the same format as the inputs.
+         */
+        std::pair<StrandRef, int> nextArcInCell(const StrandRef& arc, int side);
 
         /*@}*/
         /**
@@ -794,6 +898,32 @@ class Tangle : public Output<Tangle> {
          */
         void orientedGauss(std::ostream& out) const;
 
+        /**
+         * Constructs the \e signature for this tangle.
+         *
+         * A <i>signature</i> is a compact text representation of a tangle
+         * diagram that uniquely determines the diagram up to relabelling,
+         * rotation, and (optionally) reflection and/or reversal.
+         *
+         * The signature is constructed entirely of printable characters,
+         * and has length proportional to <tt>n log n</tt>, where \a n
+         * is the number of crossings.
+         *
+         * This routine runs in linear time.
+         *
+         * @param useReflection \c true if the reflection of a tangle diagram
+         * should have the same signature as the original, or \c false
+         * if these should be distinct (assuming the diagram is not symmetric
+         * under reflection).
+         * @param useFlipping \c true if flipping the diagram horizontally or
+         * vertically should have the same signature as the original, or \c
+         * false if these should be distinct (assuming the diagram is not
+         * symmetric under these operations).
+         * @return the signature for this tangle diagram.
+         */
+        std::string tangleSig(bool useReflection = true, bool useFlipping = true)
+            const;
+
         /*@}*/
         /**
          * \name Building Tangles
@@ -924,6 +1054,25 @@ class Tangle : public Output<Tangle> {
         template <typename Iterator>
         static Tangle fromOrientedGauss(Iterator begin, Iterator end);
 
+        /**
+         * Recovers a tangle diagram from its signature.
+         * See tangleSig() for more information on knot signatures.
+         *
+         * Calling tangleSig() followed by fromTangleSig() is not guaranteed to
+         * produce an \e identical tangle diagram to the original, but it is
+         * guaranteed to produce one that is related by relabelling, rotation,
+         * and optionally (according to the arguments that were passed to
+         * tangleSig()) reflection and/or reversal.
+         *
+         * \exception InvalidArgument the given string was not a valid
+         * tangle signature.
+         *
+         * @param sig the signature of the tangle diagram to construct.
+         * Note that signatures are case-sensitive.
+         * @return the reconstructed tangle.
+         */
+        static Tangle fromTangleSig(const std::string& sig);
+
         /*@}*/
 
     private:
@@ -963,6 +1112,41 @@ class Tangle : public Output<Tangle> {
          * \pre The argument \a oldSrc is not a null strand reference.
          */
         void rerouteFrom(const StrandRef& oldSrc, const StrandRef& newSrc);
+
+        /**
+         * Returns the start and end of an arc in the tangle, which can then be
+         * used to replace the arc with new crossings or connect it to another
+         * part of the tangle.
+         */
+        std::pair<ArcEndpoint, ArcEndpoint> arcEndpoints(const StrandRef& arc);
+
+        /**
+         * Interpreted \a arc as an arc in the tangle diagram, finds the next
+         * arc in the direction of the strand. This is equivalent to \a
+         * arc.next() except in two cases:
+         *
+         * - If \a arc is null, then it is interpreted as the first arc in the
+         *   strand referred to by \a arc.strand(), so \a nextArc(arc) will be
+         *   \a end_[arc.strand()][0].
+         *
+         * - If \a arc.next() is null, then the return value's strand will be
+         *   which strand we reached the end of.
+         *
+         * @param arc An arc of the tangle diagram.
+         * @return arc The next arc in the direction of the strand.
+         * */
+        StrandRef nextArc(const StrandRef& arc);
+
+        /**
+         * Interpreted \a arc as an arc in the tangle diagram, finds the
+         * previous arc in the direction of the strand. This is equivalent to
+         * \a arc.prev() unless \a arc.prev() is null, in which case the return
+         * value's strand will be which strand we reached the start of.
+         *
+         * @param arc An arc of the tangle diagram.
+         * @return arc The previous arc in the direction of the strand.
+         * */
+        StrandRef prevArc(const StrandRef& arc);
 
         /**
          * Internal to box().
@@ -1014,6 +1198,9 @@ void swap(Tangle& lhs, Tangle& rhs) noexcept;
 
 // Inline functions for Tangle
 
+inline Tangle::Tangle(const Tangle& cloneMe) : Tangle(cloneMe, true) {
+}
+
 inline Tangle::Tangle() : type_('-') {
     // By default, crossings_ is empty and each end_[i][j] is a null reference.
 }
@@ -1057,12 +1244,71 @@ inline StrandRef Tangle::translate(const StrandRef& other) const {
         StrandRef(nullptr, other.strand()));
 }
 
+inline bool Tangle::isEmpty() const {
+    return false;
+}
+
 inline bool Tangle::r2(Crossing* crossing, bool check, bool perform) {
     return r2(StrandRef(crossing, 1), check, perform);
 }
 
+inline bool Tangle::r3(Crossing* crossing, int side, bool check, bool perform) {
+    StrandRef s(crossing, 1);
+
+    // If we are testing, then make sure this is an uppermost arc.
+    if (check) {
+        // We already know the start of the arc is an over-crossing, by
+        // construction; we only need to check the end.
+        if (!crossing || !s.next() || s.next().strand() != 1)
+            return false;
+    }
+
+    return r3(s, side, check, perform);
+}
+
 inline void swap(Tangle& lhs, Tangle& rhs) noexcept {
     lhs.swap(rhs);
+}
+
+template <typename Action, typename... Args>
+inline bool Tangle::rewrite(int height, unsigned nThreads,
+        ProgressTrackerOpen* tracker, Action&& action, Args&&... args) const {
+    // Use RetriangulateActionTraits to deduce whether the given action takes
+    // a link or both a knot signature and link as its initial argument(s).
+    using Traits = regina::detail::RetriangulateActionTraits<Tangle, Action>;
+    static_assert(Traits::valid,
+        "The action that is passed to rewrite() does not take the correct initial argument type(s).");
+    if constexpr (Traits::withSig) {
+        return regina::detail::retriangulateInternal<Tangle, true>(
+            *this, height, nThreads, tracker,
+            [&](const std::string& sig, Tangle&& obj) {
+                return action(sig, std::move(obj), std::forward<Args>(args)...);
+            });
+    } else {
+        return regina::detail::retriangulateInternal<Tangle, false>(
+            *this, height, nThreads, tracker,
+            [&](Tangle&& obj) {
+                return action(std::move(obj), std::forward<Args>(args)...);
+            });
+    }
+}
+
+inline bool Tangle::simplifyExhaustive(int height, unsigned nThreads,
+        ProgressTrackerOpen* tracker) {
+    if (size() == 0) {
+        if (tracker)
+            tracker->setFinished();
+        return false;
+    }
+    return rewrite(height, nThreads, tracker,
+        [](Tangle&& alt, Tangle& original, size_t minCrossings) {
+            if (alt.size() < minCrossings) {
+                original = std::move(alt);
+                original.simplifyToLocalMinimum();
+                return true;
+            } else
+                return false;
+        }, *this, size());
 }
 
 } // namespace regina
