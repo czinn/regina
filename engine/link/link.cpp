@@ -333,6 +333,153 @@ long Link::writheOfComponent(StrandRef strand) const {
     return ans;
 }
 
+bool Link::propagate(size_t maxSize, std::function<bool(Link&&)>&& action) {
+    if (size() == 0) {
+        // We have a zero-crossing unknot.
+        // There is only one move we can perform on this.
+        if (maxSize > 0) {
+            Link alt(*this, false);
+            alt.r1(regina::StrandRef(), 0, 1 /* sign */, false, true);
+            action(std::move(alt));
+            return true;
+        }
+    }
+
+    // From here we assume >= 1 crossing.
+    size_t i;
+    int strand, side, sign;
+
+    for (i = 0; i < size(); ++i)
+        if (r1(crossing(i), true, false)) {
+            Link alt(*this, false);
+            alt.r1(alt.crossing(i), false, true);
+            if (action(std::move(alt)))
+                return true;
+        }
+
+    for (i = 0; i < size(); ++i)
+        if (r2(crossing(i), true, false)) {
+            Link alt(*this, false);
+            alt.r2(alt.crossing(i), false, true);
+            if (action(std::move(alt)))
+                return true;
+        }
+
+    for (i = 0; i < size(); ++i)
+        for (side = 0; side < 2; ++side)
+            if (r3(crossing(i), side, true, false)) {
+                Link alt(*this, false);
+                alt.r3(alt.crossing(i), side, false, true);
+                if (action(std::move(alt)))
+                    return true;
+            }
+
+    // R1 twist moves on arcs are always valid.
+    if (size() < maxSize)
+        for (i = 0; i < size(); ++i)
+            for (strand = 0; strand < 2; ++strand)
+                for (side = 0; side < 2; ++side)
+                    for (sign = -1; sign <= 1; sign += 2) {
+                        Link alt(*this, false);
+                        alt.r1(alt.crossing(i)->strand(strand),
+                                side, sign, false, true);
+                        if (action(std::move(alt)))
+                            return true;
+                    }
+
+    if (size() + 1 < maxSize) {
+        StrandRef upperArc, lowerArc;
+        int upperSide, lowerSide;
+        for (i = 0; i < size(); ++i)
+            for (strand = 0; strand < 2; ++strand) {
+                upperArc = crossing(i)->strand(strand);
+                for (upperSide = 0; upperSide < 2; ++upperSide) {
+                    // Walk around the 2-cell containing upperArc.
+                    // This code follows the (better documented)
+                    // code in reidemeister.cpp for testing r2 validity.
+                    //
+                    // We walk around the 2-cell from upper, ensuring
+                    // that we always turn left.
+                    //
+                    // At each stage we consider an edge of this 2-cell:
+                    //
+                    // - ref points to the strand of the crossing at the
+                    //   beginning of the edge, with respect to the
+                    //   direction in which we are walking around the
+                    //   cell;
+                    // - lowerArc points to the strand of the crossing
+                    //   at the beginning of the edge, with respect to
+                    //   the orientation of the link.
+                    // - forward indicates whether these two directions
+                    //   are the same.
+                    //
+                    // Note that we don't actually set lowerArc until we
+                    // get near the end of the while loop.
+                    //
+                    StrandRef ref = upperArc;
+                    bool forward;
+                    if (upperSide == 0) {
+                        forward = true;
+                    } else {
+                        // Since we are traversing the arc backwards,
+                        // we need to jump to the other endpoint.
+                        ref = ref.next();
+                        forward = false;
+                    }
+
+                    while (true) {
+                        // Move to the next edge around this 2-cell.
+                        if (forward) {
+                            ref = ref.next();
+                            ref.jump();
+
+                            // forward remains true for (sign, strand):
+                            // +, 0
+                            // -, 1
+                            if (ref.crossing()->sign() > 0)
+                                forward = (0 == ref.strand());
+                            else
+                                forward = (0 != ref.strand());
+                        } else {
+                            ref = ref.prev();
+                            ref.jump();
+
+                            // forward becomes true for (sign, strand):
+                            // -, 0
+                            // +, 1
+                            if (ref.crossing()->sign() > 0)
+                                forward = (0 != ref.strand());
+                            else
+                                forward = (0 == ref.strand());
+                        }
+
+                        lowerArc = (forward ? ref : ref.prev());
+
+                        // By planarity, the 2-cell can meet one side of
+                        // an arc, but never both.
+                        if (lowerArc == upperArc) {
+                            // We completed the cycle.
+                            break;
+                        }
+
+                        // Try arc as the lower strand.
+                        // Make sure we're on the correct side.
+                        lowerSide = (forward ? 0 : 1);
+
+                        Link alt(*this, false);
+                        alt.r2(alt.translate(upperArc), upperSide,
+                                alt.translate(lowerArc), lowerSide,
+                                false, true);
+                        if (action(std::move(alt)))
+                            return true;
+                    }
+                }
+            }
+    }
+
+    return false;
+}
+
 void Link::selfFrame() {
     // Some notes:
     //

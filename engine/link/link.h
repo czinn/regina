@@ -1697,6 +1697,13 @@ class Link :
             bool perform = true);
 
         /**
+         * TODO czinn: Document.
+         * Calls \a action with each link reachable in a single Reidemeister
+         * move while not exceeding \a maxSize.
+         */
+        bool propagate(size_t maxSize, std::function<bool(Link&&)>&& action);
+
+        /**
          * Tests whether this knot has a pass move that will reduce the
          * number of crossings.
          *
