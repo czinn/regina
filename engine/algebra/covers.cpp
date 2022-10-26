@@ -757,6 +757,255 @@ namespace {
             delete[] constraint;
         }
     };
+
+    template <int index>
+    struct SearchState {
+        const SignScheme& signs;
+        const GroupPresentation& g;
+        size_t nGen;
+        RelationScheme<index> scheme;
+        size_t* nAut;
+        size_t pos;
+        Perm<index>** aut;
+
+        SearchState(const SignScheme& signs, const GroupPresentation& g) :
+            signs(signs),
+            g(g),
+            nGen(g.countGenerators()),
+            // Make a plan for how we will incrementally test consistency with
+            // the group relations.
+            scheme(g) {
+            // Prepare to choose an S(index) representative for each generator.
+            // The representative for generator i will be scheme.rep[i].
+            // All representatives will be initialised to the identity.
+            nAut = new size_t[nGen];
+            // TODO czinn: This is gross and it feels like I should be able to
+            // allocate it like in the original code.
+            aut = new Perm<index>*[nGen];
+            for (size_t i = 0; i < nGen; ++i) {
+                aut[i] = new Perm<index>[maxMinimalAutGroup[index] + 1];
+            }
+            pos = 0; // The generator whose current rep we are about to try.
+            // Note: if we are constraining the sign of rep[0], then it must be
+            // constrained to even permutations (so 0 is still the correct starting
+            // point).
+        }
+
+        bool tryCurrent() {
+            bool backtrack = false;
+
+            // Check consistency with the group relations that we haven't
+            // yet checked, and that containly only generators whose reps
+            // have been chosen so far.
+            if (! backtrack) {
+                if (! scheme.computeFor(pos))
+                    backtrack = true;
+            }
+
+            // Check that the reps are conjugacy minimal, so far.
+            // Note: for index 2, *everything* is conjugacy minimal.
+            if constexpr (index > 2) {
+                if (! backtrack) {
+                    if (pos == 0 || nAut[pos - 1] == 0) {
+                        // Currently the automorphism group for the entire
+                        // set of reps chosen before now is all of S_index.
+                        // This means that rep[pos] needs to be conjugacy minimal.
+                        if (scheme.rep[pos].isConjugacyMinimal()) {
+                            if (scheme.rep[pos].isIdentity()) {
+                                // The automorphism group remains all of S_index.
+                                nAut[pos] = 0;
+                            } else {
+                                // Set up the automorphism group for this rep
+                                // by explicitly listing the automorphisms.
+                                int idx = 0;
+                                while (allMinimalPerms[idx] !=
+                                        scheme.rep[pos].SnIndex())
+                                    ++idx;
+
+                                nAut[pos] = 0;
+                                while (minimalAutGroup<index>[idx][nAut[pos]]
+                                        >= 0) {
+                                    aut[pos][nAut[pos]] = Perm<index>::Sn[
+                                        minimalAutGroup<index>[idx][nAut[pos]]];
+                                    ++nAut[pos];
+                                }
+                            }
+                        } else {
+                            backtrack = true;
+                        }
+                    } else {
+                        // The previous reps are together conjugacy minimal,
+                        // and we have their automorphism group stored.
+                        nAut[pos] = 0;
+                        Perm<index> conj;
+                        for (size_t a = 0; a < nAut[pos - 1]; ++a) {
+                            Perm<index> p = aut[pos - 1][a];
+                            if constexpr (RelationScheme<index>::cacheProducts) {
+                                conj = p.cachedComp(scheme.rep[pos], p.inverse());
+                            } else {
+                                conj = p * scheme.rep[pos] * p.inverse();
+                            }
+                            if (conj < scheme.rep[pos]) {
+                                // Not conjugacy minimal.
+                                backtrack = true;
+                                break;
+                            } else if (conj == scheme.rep[pos]) {
+                                // This remains part of our automorphism
+                                // group going forwards.
+                                aut[pos][nAut[pos]++] = p;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (! backtrack) {
+                ++pos;
+                if (pos != nGen) {
+                    if (signs.constraint[pos]) {
+                        // We have just moved onto the next generator, and
+                        // its sign is constrained.  Work out if the sign
+                        // needs to be positive or negative.
+                        int sign = 0;
+                        for (auto g : *signs.constraint[pos])
+                            if (scheme.rep[g].sign() < 0)
+                                sign ^= 1;
+                        if (sign != 0)
+                            ++scheme.rep[pos];
+                    }
+                }
+            }
+
+            return !backtrack;
+        }
+
+        bool getCandidate(std::function<void(GroupPresentation&&)>&& action) {
+            if (pos != nGen) return false;
+
+            // We have a candidate representation.
+
+            // Is it transitive?
+            //
+            // Use a depth-first search to see if we can reach
+            // every sheet using the chosen reps.
+            //
+            // We also record *which* routes we found to reach
+            // all of the sheets, since together these give us a
+            // "spanning tree" of subgroup generators that should all
+            // be replaced with the identity in the subgroup.
+
+            // Note: we are guaranteed nGen >= 1.
+
+            bool seen[index];
+            std::fill(seen, seen + index, false);
+            seen[0] = true;
+
+            int nFound = 1;
+
+            int stack[index];
+            int stackSize = 1;
+            stack[0] = 0;
+
+            unsigned long spanningTree[index - 1];
+
+            while (nFound < index && stackSize > 0) {
+                int from = stack[--stackSize];
+                for (unsigned long i = 0; i < nGen; ++i) {
+                    int to = scheme.rep[i][from];
+                    if (! seen[to]) {
+                        seen[to] = true;
+                        stack[stackSize++] = to;
+
+                        // Add (generator i, sheet from) to the
+                        // spanning tree.
+                        spanningTree[nFound - 1] = i * index + from;
+
+                        ++nFound;
+                    }
+                }
+            }
+
+            if (nFound == index) {
+                // The representation is transitive!
+                // Build the subgroup representation and act on it.
+
+                size_t subGenerators = index * nGen;
+                std::vector<GroupExpression> subRelations;
+                subRelations.reserve(index * g.countRelations());
+
+                std::sort(spanningTree, spanningTree + index - 1);
+
+                auto* rewrite = new unsigned long[subGenerators];
+
+                // Work out how the subgroup generators will be relabelled
+                // once the spanning tree is removed.
+                unsigned long treeIdx = 0;
+                for (unsigned long i = 0; i < subGenerators; ++i) {
+                    if (treeIdx < index - 1 && spanningTree[treeIdx] == i) {
+                        // This generator will be removed from the subgroup.
+                        rewrite[i] = subGenerators;
+                        ++treeIdx;
+                    } else
+                        rewrite[i] = i - treeIdx;
+                }
+                subGenerators -= (index - 1);
+
+                for (const auto& r : g.relations()) {
+                    for (int start = 0; start < index; ++start) {
+                        GroupExpression e;
+                        int sheet = start;
+                        unsigned long gen;
+                        for (const auto& t : r.terms()) {
+                            if (t.exponent > 0) {
+                                for (long i = 0; i < t.exponent; ++i) {
+                                    gen = rewrite[
+                                        t.generator * index + sheet];
+                                    if (gen < subGenerators)
+                                        e.addTermLast(gen, 1);
+                                    sheet = scheme.rep[t.generator][sheet];
+                                }
+                            } else if (t.exponent < 0) {
+                                for (long i = 0; i > t.exponent; --i) {
+                                    sheet = scheme.rep[t.generator]
+                                        .pre(sheet);
+                                    gen = rewrite[
+                                        t.generator * index + sheet];
+                                    if (gen < subGenerators)
+                                        e.addTermLast(gen, -1);
+                                }
+                            }
+                        }
+                        if (! e.terms().empty())
+                            subRelations.push_back(std::move(e));
+                    }
+                }
+
+                delete[] rewrite;
+
+                action(std::move(GroupPresentation(subGenerators, subRelations)));
+            }
+            --pos;
+            return nFound == index;
+        }
+
+        // Returns whether all possibilities at the current level have been tried.
+        bool next() {
+            // Move on to the next permutation, or if we are constraining
+            // the sign of rep[pos] then increment *twice*.
+            ++scheme.rep[pos];
+            if (signs.constraint[pos] && ! scheme.rep[pos].isIdentity())
+                ++scheme.rep[pos];
+            return scheme.rep[pos].isIdentity();
+        }
+
+        ~SearchState() {
+            delete[] nAut;
+            for (size_t i = 0; i < nGen; ++i) {
+                delete[] aut[i];
+            }
+            delete[] aut;
+        }
+    };
 }
 
 void GroupPresentation::minimaxGenerators() {
@@ -879,240 +1128,40 @@ size_t GroupPresentation::enumerateCoversInternal(
     // relations as early as possible and backtrack if they break.
     minimaxGenerators();
 
-    // Make a plan for how we will incrementally test consistency with
-    // the group relations.
-    RelationScheme<index> scheme(*this);
-
     // Work out what constraints the group relations impose on the signs
     // of the chosen representative permutations.
     SignScheme signs(*this);
 
-    // Prepare to choose an S(index) representative for each generator.
-    // The representative for generator i will be scheme.rep[i].
-    // All representatives will be initialised to the identity.
     size_t nReps = 0;
 
-    auto* nAut = new size_t[nGenerators_];
-    auto* aut = new Perm<index>[nGenerators_][maxMinimalAutGroup[index] + 1];
+    SearchState<index> searchState(signs, *this);
 
-    size_t pos = 0; // The generator whose current rep we are about to try.
-    // Note: if we are constraining the sign of rep[0], then it must be
-    // constrained to even permutations (so 0 is still the correct starting
-    // point).
     while (true) {
         bool backtrack = false;
 
-        // Check consistency with the group relations that we haven't
-        // yet checked, and that containly only generators whose reps
-        // have been chosen so far.
-        if (! backtrack) {
-            if (! scheme.computeFor(pos))
+        if (searchState.tryCurrent()) {
+            if (searchState.pos == nGenerators_) {
+                bool foundRep = searchState.getCandidate([&](GroupPresentation&& group) {
+                        action(std::move(group));
+                });
+                if (foundRep) ++nReps;
                 backtrack = true;
-        }
-
-        // Check that the reps are conjugacy minimal, so far.
-        // Note: for index 2, *everything* is conjugacy minimal.
-        if constexpr (index > 2) {
-            if (! backtrack) {
-                if (pos == 0 || nAut[pos - 1] == 0) {
-                    // Currently the automorphism group for the entire
-                    // set of reps chosen before now is all of S_index.
-                    // This means that rep[pos] needs to be conjugacy minimal.
-                    if (scheme.rep[pos].isConjugacyMinimal()) {
-                        if (scheme.rep[pos].isIdentity()) {
-                            // The automorphism group remains all of S_index.
-                            nAut[pos] = 0;
-                        } else {
-                            // Set up the automorphism group for this rep
-                            // by explicitly listing the automorphisms.
-                            int idx = 0;
-                            while (allMinimalPerms[idx] !=
-                                    scheme.rep[pos].SnIndex())
-                                ++idx;
-
-                            nAut[pos] = 0;
-                            while (minimalAutGroup<index>[idx][nAut[pos]]
-                                    >= 0) {
-                                aut[pos][nAut[pos]] = Perm<index>::Sn[
-                                    minimalAutGroup<index>[idx][nAut[pos]]];
-                                ++nAut[pos];
-                            }
-                        }
-                    } else {
-                        backtrack = true;
-                    }
-                } else {
-                    // The previous reps are together conjugacy minimal,
-                    // and we have their automorphism group stored.
-                    nAut[pos] = 0;
-                    Perm<index> conj;
-                    for (size_t a = 0; a < nAut[pos - 1]; ++a) {
-                        Perm<index> p = aut[pos - 1][a];
-                        if constexpr (RelationScheme<index>::cacheProducts) {
-                            conj = p.cachedComp(scheme.rep[pos], p.inverse());
-                        } else {
-                            conj = p * scheme.rep[pos] * p.inverse();
-                        }
-                        if (conj < scheme.rep[pos]) {
-                            // Not conjugacy minimal.
-                            backtrack = true;
-                            break;
-                        } else if (conj == scheme.rep[pos]) {
-                            // This remains part of our automorphism
-                            // group going forwards.
-                            aut[pos][nAut[pos]++] = p;
-                        }
-                    }
-                }
             }
-        }
-
-        // Move on to the next generator.
-        if (! backtrack) {
-            ++pos;
-            if (pos == nGenerators_) {
-                // We have a candidate representation.
-
-                // Is it transitive?
-                //
-                // Use a depth-first search to see if we can reach
-                // every sheet using the chosen reps.
-                //
-                // We also record *which* routes we found to reach
-                // all of the sheets, since together these give us a
-                // "spanning tree" of subgroup generators that should all
-                // be replaced with the identity in the subgroup.
-
-                // Note: we are guaranteed nGenerators_ >= 1.
-
-                bool seen[index];
-                std::fill(seen, seen + index, false);
-                seen[0] = true;
-
-                int nFound = 1;
-
-                int stack[index];
-                int stackSize = 1;
-                stack[0] = 0;
-
-                unsigned long spanningTree[index - 1];
-
-                while (nFound < index && stackSize > 0) {
-                    int from = stack[--stackSize];
-                    for (unsigned long i = 0; i < nGenerators_; ++i) {
-                        int to = scheme.rep[i][from];
-                        if (! seen[to]) {
-                            seen[to] = true;
-                            stack[stackSize++] = to;
-
-                            // Add (generator i, sheet from) to the
-                            // spanning tree.
-                            spanningTree[nFound - 1] = i * index + from;
-
-                            ++nFound;
-                        }
-                    }
-                }
-
-                if (nFound == index) {
-                    // The representation is transitive!
-                    // Build the subgroup representation and act on it.
-
-                    GroupPresentation sub;
-                    sub.nGenerators_ = index * nGenerators_;
-                    sub.relations_.reserve(index * relations_.size());
-
-                    std::sort(spanningTree, spanningTree + index - 1);
-
-                    auto* rewrite = new unsigned long[sub.nGenerators_];
-
-                    // Work out how the subgroup generators will be relabelled
-                    // once the spanning tree is removed.
-                    unsigned long treeIdx = 0;
-                    for (unsigned long i = 0; i < sub.nGenerators_; ++i) {
-                        if (treeIdx < index - 1 && spanningTree[treeIdx] == i) {
-                            // This generator will be removed from the subgroup.
-                            rewrite[i] = sub.nGenerators_;
-                            ++treeIdx;
-                        } else
-                            rewrite[i] = i - treeIdx;
-                    }
-                    sub.nGenerators_ -= (index - 1);
-
-                    for (const auto& r : relations_) {
-                        for (int start = 0; start < index; ++start) {
-                            GroupExpression e;
-                            int sheet = start;
-                            unsigned long gen;
-                            for (const auto& t : r.terms()) {
-                                if (t.exponent > 0) {
-                                    for (long i = 0; i < t.exponent; ++i) {
-                                        gen = rewrite[
-                                            t.generator * index + sheet];
-                                        if (gen < sub.nGenerators_)
-                                            e.addTermLast(gen, 1);
-                                        sheet = scheme.rep[t.generator][sheet];
-                                    }
-                                } else if (t.exponent < 0) {
-                                    for (long i = 0; i > t.exponent; --i) {
-                                        sheet = scheme.rep[t.generator]
-                                            .pre(sheet);
-                                        gen = rewrite[
-                                            t.generator * index + sheet];
-                                        if (gen < sub.nGenerators_)
-                                            e.addTermLast(gen, -1);
-                                    }
-                                }
-                            }
-                            if (! e.terms().empty())
-                                sub.relations_.push_back(std::move(e));
-                        }
-                    }
-
-                    delete[] rewrite;
-
-                    ++nReps;
-                    action(std::move(sub));
-                }
-
-                --pos;
-                backtrack = true;
-            } else {
-                if (signs.constraint[pos]) {
-                    // We have just moved onto the next generator, and
-                    // its sign is constrained.  Work out if the sign
-                    // needs to be positive or negative.
-                    int sign = 0;
-                    for (auto g : *signs.constraint[pos])
-                        if (scheme.rep[g].sign() < 0)
-                            sign ^= 1;
-                    if (sign != 0)
-                        ++scheme.rep[pos];
-                }
-                continue;
-            }
+        } else {
+            backtrack = true;
         }
 
         if (backtrack) {
-            while (true) {
-                // Move on to the next permutation, or if we are constraining
-                // the sign of rep[pos] then increment *twice*.
-                ++scheme.rep[pos];
-                if (signs.constraint[pos] && ! scheme.rep[pos].isIdentity())
-                    ++scheme.rep[pos];
-                if (! scheme.rep[pos].isIdentity())
-                    break;
-                if (pos == 0)
+            while (searchState.next()) {
+                if (searchState.pos == 0)
                     goto finished;
-                --pos;
+                --searchState.pos;
             }
         }
     }
 
 finished:
 
-    delete[] aut;
-    delete[] nAut;
     return nReps;
 }
 

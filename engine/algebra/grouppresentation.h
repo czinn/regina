@@ -809,6 +809,10 @@ class GroupPresentation : public Output<GroupPresentation> {
         GroupPresentation(unsigned long nGens,
                 const std::vector<std::string> &rels);
 
+        /** TODO czinn: Document */
+        GroupPresentation(unsigned long nGens,
+                const std::vector<GroupExpression> &rels);
+
         /**
          * Sets this to be a clone of the given group presentation.
          *

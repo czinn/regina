@@ -717,6 +717,10 @@ GroupPresentation::GroupPresentation(unsigned long nGens,
         relations_.emplace_back(r);
 }
 
+GroupPresentation::GroupPresentation(unsigned long nGens,
+        const std::vector<GroupExpression> &rels)
+    : nGenerators_(nGens), relations_(rels) {}
+
 bool GroupPresentation::simplifyWord( GroupExpression &input ) const
 {
     bool retval( input.simplify(false) );
