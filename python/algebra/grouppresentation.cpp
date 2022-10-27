@@ -194,6 +194,52 @@ void addGroupPresentation(pybind11::module_& m) {
             throw regina::InvalidArgument("The index passed to "
                 "enumerateCovers() must be between 2 and 7 inclusive.");
         })
+        .def("enumerateCoversConcurrent", [](const GroupPresentation& p, int index,
+                int concurrentLayers, unsigned nThreads) {
+            std::vector<GroupPresentation> ans;
+            auto push = [&](GroupPresentation&& result) {
+                ans.push_back(std::move(result));
+            };
+            switch (index) {
+                case 2: p.enumerateCoversConcurrent<2>(
+                                concurrentLayers, nThreads, push); break;
+                case 3: p.enumerateCoversConcurrent<3>(
+                                concurrentLayers, nThreads, push); break;
+                case 4: p.enumerateCoversConcurrent<4>(
+                                concurrentLayers, nThreads, push); break;
+                case 5: p.enumerateCoversConcurrent<5>(
+                                concurrentLayers, nThreads, push); break;
+                case 6: p.enumerateCoversConcurrent<6>(
+                                concurrentLayers, nThreads, push); break;
+                case 7: p.enumerateCoversConcurrent<7>(
+                                concurrentLayers, nThreads, push); break;
+                default:
+                    throw regina::InvalidArgument("The index passed to "
+                        "enumerateCovers() must be between 2 and 7 inclusive.");
+            }
+            return ans;
+        })
+        .def("enumerateCoversConcurrent", [](const GroupPresentation& p, int index,
+                int concurrentLayers, unsigned nThreads,
+                const std::function<void(GroupPresentation&&)>& action)
+                -> size_t {
+            switch (index) {
+                case 2: return p.enumerateCoversConcurrent<2>(
+                                concurrentLayers, nThreads, action);
+                case 3: return p.enumerateCoversConcurrent<3>(
+                                concurrentLayers, nThreads, action);
+                case 4: return p.enumerateCoversConcurrent<4>(
+                                concurrentLayers, nThreads, action);
+                case 5: return p.enumerateCoversConcurrent<5>(
+                                concurrentLayers, nThreads, action);
+                case 6: return p.enumerateCoversConcurrent<6>(
+                                concurrentLayers, nThreads, action);
+                case 7: return p.enumerateCoversConcurrent<7>(
+                                concurrentLayers, nThreads, action);
+            }
+            throw regina::InvalidArgument("The index passed to "
+                "enumerateCovers() must be between 2 and 7 inclusive.");
+        })
         .def("incidence", &GroupPresentation::incidence)
         .def("tex", &GroupPresentation::tex)
         .def("compact", &GroupPresentation::compact)

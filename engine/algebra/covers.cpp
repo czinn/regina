@@ -30,6 +30,10 @@
  *                                                                        *
  **************************************************************************/
 
+#include <condition_variable>
+#include <mutex>
+#include <queue>
+#include <thread>
 #include "algebra/grouppresentation.h"
 #include "maths/perm.h"
 #include "maths/matrix.h"
@@ -505,6 +509,23 @@ namespace {
             computed = new Perm<index>[compCount[nGen]];
         }
 
+        RelationScheme(const RelationScheme& scheme) :
+            nGen(scheme.nGen),
+            formulae(scheme.formulae) {
+            compCount = new size_t[nGen + 1];
+            for (size_t i = 0; i < nGen + 1; ++i) {
+                compCount[i] = scheme.compCount[i];
+            }
+            rep = new Perm<index>[nGen];
+            for (size_t i = 0; i < nGen; ++i) {
+                rep[i] = scheme.rep[i];
+            }
+            computed = new Perm<index>[compCount[nGen]];
+            for (size_t i = 0; i < compCount[nGen]; ++i) {
+                computed[i] = scheme.computed[i];
+            }
+        }
+
         ~RelationScheme() {
             delete[] compCount;
             delete[] rep;
@@ -791,6 +812,26 @@ namespace {
             // point).
         }
 
+        SearchState(const SearchState& state) :
+            signs(state.signs),
+            g(state.g),
+            nGen(state.nGen),
+            scheme(state.scheme),
+            pos(state.pos) {
+            nAut = new size_t[nGen];
+            // TODO czinn: Memcopy here instead
+            for (size_t i = 0; i < nGen; ++i) {
+                nAut[i] = state.nAut[i];
+            }
+            aut = new Perm<index>*[nGen];
+            for (size_t i = 0; i < nGen; ++i) {
+                aut[i] = new Perm<index>[maxMinimalAutGroup[index] + 1];
+                for (size_t j = 0; j < maxMinimalAutGroup[index] + 1; ++j) {
+                    aut[i][j] = state.aut[i][j];
+                }
+            }
+        }
+
         bool tryCurrent() {
             bool backtrack = false;
 
@@ -998,6 +1039,45 @@ namespace {
             return scheme.rep[pos].isIdentity();
         }
 
+        size_t runLocally(std::function<void(GroupPresentation&&)>&& action) {
+            if (pos == nGen) {
+                bool foundRep = getCandidate([&](GroupPresentation&& group) {
+                    action(std::move(group));
+                });
+                return foundRep ? 1 : 0;
+            }
+
+            size_t nReps = 0;
+            size_t startPos = pos;
+
+            while (true) {
+                bool backtrack = false;
+
+                if (tryCurrent()) {
+                    if (pos == nGen) {
+                        bool foundRep = getCandidate([&](GroupPresentation&& group) {
+                            action(std::move(group));
+                        });
+                        if (foundRep) ++nReps;
+                        backtrack = true;
+                    }
+                } else {
+                    backtrack = true;
+                }
+
+                if (backtrack) {
+                    while (next()) {
+                        if (pos == startPos)
+                            goto finished;
+                        --pos;
+                    }
+                }
+            }
+
+        finished:
+            return nReps;
+        }
+
         ~SearchState() {
             delete[] nAut;
             for (size_t i = 0; i < nGen; ++i) {
@@ -1132,35 +1212,103 @@ size_t GroupPresentation::enumerateCoversInternal(
     // of the chosen representative permutations.
     SignScheme signs(*this);
 
-    size_t nReps = 0;
-
     SearchState<index> searchState(signs, *this);
+    return searchState.runLocally([&](GroupPresentation&& group) {
+        action(std::move(group));
+    });
+}
 
-    while (true) {
-        bool backtrack = false;
+template <int index>
+size_t GroupPresentation::enumerateCoversConcurrentInternal(
+        int concurrentLayers, unsigned nThreads,
+        std::function<void(GroupPresentation&&)>&& action) {
+    static_assert(2 <= index && index <= 7,
+        "Currently enumerateCovers() is only available for 2 <= index <= 7.");
 
-        if (searchState.tryCurrent()) {
-            if (searchState.pos == nGenerators_) {
-                bool foundRep = searchState.getCandidate([&](GroupPresentation&& group) {
-                        action(std::move(group));
-                });
-                if (foundRep) ++nReps;
-                backtrack = true;
-            }
-        } else {
-            backtrack = true;
-        }
-
-        if (backtrack) {
-            while (searchState.next()) {
-                if (searchState.pos == 0)
-                    goto finished;
-                --searchState.pos;
-            }
-        }
+    if (nGenerators_ == 0) {
+        return 0;
     }
 
-finished:
+    // Relabel and reorder generators and relations so that we can check
+    // relations as early as possible and backtrack if they break.
+    minimaxGenerators();
+
+    // Work out what constraints the group relations impose on the signs
+    // of the chosen representative permutations.
+    SignScheme signs(*this);
+
+    std::priority_queue<SearchState<index>*,
+        std::vector<SearchState<index>*>,
+        std::function<bool(SearchState<index>*, SearchState<index>*)>>
+        q([](SearchState<index>* a, SearchState<index>* b) {
+                return a->pos > b->pos;
+            });
+    q.push(new SearchState<index>(signs, *this));
+
+    std::mutex q_m;
+    std::mutex action_m;
+
+    size_t nReps = 0;
+    std::vector<std::thread> threads;
+    unsigned waitingThreads = 0;
+    std::mutex waitingThreads_m;
+    std::condition_variable waitingThreads_cv;
+    for (unsigned i = 0; i < nThreads; ++i) {
+        threads.emplace_back([&]() {
+            while (true) {
+                SearchState<index>* state = nullptr;
+                {
+                    std::scoped_lock lock(q_m);
+                    if (!q.empty()) {
+                        state = new SearchState(*q.top());
+                        if (q.top()->next()) {
+                            delete q.top();
+                            q.pop();
+                        }
+                    }
+                }
+
+                if (state == nullptr) {
+                    std::unique_lock lock(waitingThreads_m);
+                    waitingThreads++;
+                    if (waitingThreads == nThreads) {
+                        waitingThreads_cv.notify_all();
+                        break;
+                    }
+                    waitingThreads_cv.wait(lock);
+                    if (waitingThreads == nThreads) {
+                        break;
+                    }
+                    waitingThreads--;
+                    continue;
+                }
+
+                if (state->tryCurrent()) {
+                    if (state->pos < concurrentLayers && state->pos < nGenerators_) {
+                        std::scoped_lock lock(q_m);
+                        q.push(state);
+                    } else {
+                        // Finish this case locally.
+                        size_t nNewReps = state->runLocally([&](GroupPresentation&& group) {
+                            std::scoped_lock lock(action_m);
+                            action(std::move(group));
+                        });
+                        if (nNewReps > 0) {
+                            std::scoped_lock lock(action_m);
+                            nReps += nNewReps;
+                        }
+                        delete state;
+                    }
+                } else {
+                    delete state;
+                }
+            }
+        });
+    }
+
+    for (auto &t : threads) {
+        t.join();
+    }
 
     return nReps;
 }
@@ -1177,6 +1325,25 @@ template size_t GroupPresentation::enumerateCoversInternal<5>(
 template size_t GroupPresentation::enumerateCoversInternal<6>(
         std::function<void(GroupPresentation&&)>&& action);
 template size_t GroupPresentation::enumerateCoversInternal<7>(
+        std::function<void(GroupPresentation&&)>&& action);
+
+template size_t GroupPresentation::enumerateCoversConcurrentInternal<2>(
+        int concurrentLayers, unsigned nThreads,
+        std::function<void(GroupPresentation&&)>&& action);
+template size_t GroupPresentation::enumerateCoversConcurrentInternal<3>(
+        int concurrentLayers, unsigned nThreads,
+        std::function<void(GroupPresentation&&)>&& action);
+template size_t GroupPresentation::enumerateCoversConcurrentInternal<4>(
+        int concurrentLayers, unsigned nThreads,
+        std::function<void(GroupPresentation&&)>&& action);
+template size_t GroupPresentation::enumerateCoversConcurrentInternal<5>(
+        int concurrentLayers, unsigned nThreads,
+        std::function<void(GroupPresentation&&)>&& action);
+template size_t GroupPresentation::enumerateCoversConcurrentInternal<6>(
+        int concurrentLayers, unsigned nThreads,
+        std::function<void(GroupPresentation&&)>&& action);
+template size_t GroupPresentation::enumerateCoversConcurrentInternal<7>(
+        int concurrentLayers, unsigned nThreads,
         std::function<void(GroupPresentation&&)>&& action);
 
 } // namespace regina

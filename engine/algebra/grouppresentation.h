@@ -1418,6 +1418,13 @@ class GroupPresentation : public Output<GroupPresentation> {
         size_t enumerateCovers(Action&& action, Args&&... args) const;
 
         /**
+         * TODO czinn: Document
+         */
+        template <int index, typename Action, typename... Args>
+        size_t enumerateCoversConcurrent(int concurrentLayers,
+                unsigned nThreads, Action&& action, Args&&... args) const;
+
+        /**
          * Returns a matrix indicating which generators are used by
          * which relations.
          *
@@ -1709,6 +1716,15 @@ class GroupPresentation : public Output<GroupPresentation> {
             std::function<void(GroupPresentation&&)>&& action);
 
         /**
+         * Contains the bulk of the implementation for
+         * enumerateCoversConcurrent(). See enumerateCovers() and
+         * enumerateCoversConcurrent() for more details.
+         */
+        template <int index>
+        size_t enumerateCoversConcurrentInternal(int concurrentLayers,
+            unsigned nThreads, std::function<void(GroupPresentation&&)>&& action);
+
+        /**
          * Relabels the generators and reorders the relations in the
          * hope that an initial subset of generators will cover a large
          * initial subset of relations.
@@ -1970,6 +1986,19 @@ inline size_t GroupPresentation::enumerateCovers(
     // Do the real work on a temporary copy of this presentation that we
     // can be free to modify as we see fit.
     return GroupPresentation(*this).enumerateCoversInternal<index>(
+        [&](GroupPresentation&& g) {
+            action(std::move(g), std::forward<Args>(args)...);
+        });
+}
+
+template <int index, typename Action, typename... Args>
+inline size_t GroupPresentation::enumerateCoversConcurrent(
+        int concurrentLayers, unsigned nThreads,
+        Action&& action, Args&&... args) const {
+    // Do the real work on a temporary copy of this presentation that we
+    // can be free to modify as we see fit.
+    return GroupPresentation(*this).enumerateCoversConcurrentInternal<index>(
+        concurrentLayers, nThreads,
         [&](GroupPresentation&& g) {
             action(std::move(g), std::forward<Args>(args)...);
         });
