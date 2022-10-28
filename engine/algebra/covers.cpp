@@ -1312,6 +1312,7 @@ size_t GroupPresentation::enumerateCoversConcurrentInternal(
                     if (state->pos < concurrentLayers && state->pos < nGenerators_) {
                         std::scoped_lock lock(q_m);
                         q.push(state);
+                        waitingThreads_cv.notify_all();
                     } else {
                         // Finish this case locally.
                         size_t nNewReps = state->runLocally([&](GroupPresentation&& group) {
