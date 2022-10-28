@@ -151,7 +151,6 @@ void addPerm(pybind11::module_& m) {
         .export_values()
         ;
 
-    addPerm<8>(m, "Perm8");
     addPerm<9>(m, "Perm9");
     addPerm<10>(m, "Perm10");
     addPerm<11>(m, "Perm11");

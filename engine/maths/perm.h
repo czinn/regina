@@ -138,7 +138,7 @@ enum PermCodeType {
  * Thus the internal code may be a useful means for passing permutation
  * objects to and from the engine.  These codes are constructed as follows:
  *
- * - For 8 &le; \a n &le; 16, the code is an <i>image pack</i>: essentially a
+ * - For 9 &le; \a n &le; 16, the code is an <i>image pack</i>: essentially a
  *   packed array that holds the images of 0,...,<i>n</i>-1 in a single native
  *   integer type.  More precisely, this is an unsigned integer of type
  *   \a ImagePack, whose lowest \a imageBits bits represent the image of 0,
@@ -146,7 +146,7 @@ enum PermCodeType {
  *   This scheme is consistent with the old first-generation codes for
  *   \a n = 4,...,7, which are still supported but no longer used internally.
  *
- * - For \a n &le; 7, the code is an index into a hard-coded list of
+ * - For \a n &le; 8, the code is an index into a hard-coded list of
  *   all possible permutations; more precisely, an index into the symmetric
  *   group Perm<n>::Sn.  The ordering of Perm<n>::Sn is "almost lexicographic",
  *   in that we swap some pairs of indices (2<i>k</i>, 2<i>k</i>+1) to ensure
@@ -154,9 +154,9 @@ enum PermCodeType {
  *
  * For \a n = 2,...,5 (which appear throughout 2-, 3- and 4-manifold
  * triangulations), this template is specialised: the code is highly optimised
- * and also offers some extra functionality.  For \a n = 6,7, this template
+ * and also offers some extra functionality.  For \a n = 6,7,8, this template
  * is again specialised and highly optimised, and it offers some extra
- * functionality but not as much as Perm<5> and below.  For \a n &ge; 8,
+ * functionality but not as much as Perm<5> and below.  For \a n &ge; 9,
  * this template is generic and most operations require more time (in
  * particular, there are no harded-coded lookup tables).
  *
@@ -171,8 +171,8 @@ enum PermCodeType {
  */
 template <int n>
 class Perm {
-    static_assert(n >= 8 && n <= 16,
-        "The generic Perm<n> template is only available for 8 <= n <= 16.");
+    static_assert(n >= 9 && n <= 16,
+        "The generic Perm<n> template is only available for 9 <= n <= 16.");
 
     public:
         /**
@@ -202,7 +202,7 @@ class Perm {
          * Indicates the native unsigned integer type used to store a
          * single image pack.  See the class notes for more information
          * on image packs, and how they are used as permutation codes
-         * for \a n &ge; 7.
+         * for \a n &ge; 8.
          */
         using ImagePack = typename IntOfMinSize<(imageBits * n + 7) / 8>::utype;
 
@@ -220,7 +220,7 @@ class Perm {
          *
          * This type alias is present for most values of \a n, though its
          * precise size depends on how the permutation code is constructed.
-         * However, for \a n = 4,...,7 it is replaced by two type aliases
+         * However, for \a n = 4,...,8 it is replaced by two type aliases
          * \a Code1 and \a Code2, which describe the older first-generation
          * and newer second-generation permutation codes respectively.
          */
@@ -252,7 +252,7 @@ class Perm {
          * This is only relevant for the generic Perm<n> template, where
          * tight encodings have a fixed length.
          */
-        static constexpr int tightChars_ = (n == 8 || n == 9 ? 3 :
+        static constexpr int tightChars_ = (n == 9 ? 3 :
              n == 10 || n == 11 ? 4 : n == 12 || n == 13 ? 5 : n == 14 ? 6 : 7);
 
         /**
@@ -263,8 +263,8 @@ class Perm {
              * Returns the permutation at the given index in the array Sn.
              * See Perm<n>::Sn for details.
              *
-             * For \a n &le; 7, this operator is very fast (and constant time).
-             * However, for \a n &ge; 8 it is not constant time; the current
+             * For \a n &le; 9, this operator is very fast (and constant time).
+             * However, for \a n &ge; 9 it is not constant time; the current
              * implementation is quadratic in \a n.
              *
              * @param index an index between 0 and <i>n</i>!-1 inclusive.
@@ -281,8 +281,8 @@ class Perm {
              * Returns the permutation at the given index in the array
              * orderedSn.  See Perm<n>::orderedSn for details.
              *
-             * For \a n &le; 7, this operator is very fast (and constant time).
-             * However, for \a n &ge; 8 it is not constant time; the current
+             * For \a n &le; 8, this operator is very fast (and constant time).
+             * However, for \a n &ge; 9 it is not constant time; the current
              * implementation is quadratic in \a n.
              *
              * @param index an index between 0 and <i>n</i>!-1 inclusive.
@@ -312,8 +312,8 @@ class Perm {
          * alternates between even and odd permutations, whereas \a orderedSn
          * stores permutations in lexicographical order.
          *
-         * \warning For \a n &le; 7, the square bracket operator is a
-         * very fast constant-time routine.  However, for \a n &ge; 8,
+         * \warning For \a n &le; 8, the square bracket operator is a
+         * very fast constant-time routine.  However, for \a n &ge; 9,
          * this is not constant time; the current implementation is
          * quadratic in \a n.
          */
@@ -338,8 +338,8 @@ class Perm {
          * stores permutations in lexicographical order, whereas \a Sn
          * alternates between even and odd permutations.
          *
-         * \warning For \a n &le; 7, the square bracket operator is a
-         * very fast constant-time routine.  However, for \a n &ge; 8,
+         * \warning For \a n &le; 8, the square bracket operator is a
+         * very fast constant-time routine.  However, for \a n &ge; 9,
          * this is not constant time; the current implementation is
          * quadratic in \a n.
          */
@@ -446,7 +446,7 @@ class Perm {
          * See the class notes for more information on image packs, and how
          * they are used to build permutation codes.
          *
-         * For \a n &ge; 7, this routine is identical to permCode().
+         * For \a n &ge; 9, this routine is identical to permCode().
          *
          * @return the image pack for this permutation.
          */
@@ -458,7 +458,7 @@ class Perm {
          * See the class notes for more information on image packs, and how
          * they are used to build permutation codes.
          *
-         * For \a n &ge; 7, this routine is identical to fromPermCode().
+         * For \a n &ge; 9, this routine is identical to fromPermCode().
          *
          * \pre The argument \a pack is a valid image pack; see isImagePack()
          * for details.
@@ -475,7 +475,7 @@ class Perm {
          * See the class notes for more information on image packs, and how
          * they are used to build permutation codes.
          *
-         * For \a n &ge; 7, this routine is identical to isPermCode().
+         * For \a n &ge; 9, this routine is identical to isPermCode().
          *
          * @param pack the candidate image pack to test.
          * @return \c true if and only if \a pack is a valid image pack.
@@ -693,9 +693,9 @@ class Perm {
          *
          * For all permutation classes Perm<n>, the tight encoding is based on
          * the index into the full permutation group \a S_n.  For smaller
-         * permutation classes (\a n &le; 7), such encodings are very fast to
+         * permutation classes (\a n &le; 8), such encodings are very fast to
          * work with since the \a S_n index is used as the internal permutation
-         * code.  For larger permutation classes however (8 &le; \a n &le; 16),
+         * code.  For larger permutation classes however (9 &le; \a n &le; 16),
          * the \a S_n index requires some non-trivial work to compute.
          *
          * \ifacespython Not present; use tightEncoding() instead, which
@@ -712,9 +712,9 @@ class Perm {
          *
          * For all permutation classes Perm<n>, the tight encoding is based on
          * the index into the full permutation group \a S_n.  For smaller
-         * permutation classes (\a n &le; 7), such encodings are very fast to
+         * permutation classes (\a n &le; 8), such encodings are very fast to
          * work with since the \a S_n index is used as the internal permutation
-         * code.  For larger permutation classes however (8 &le; \a n &le; 16),
+         * code.  For larger permutation classes however (9 &le; \a n &le; 16),
          * the \a S_n index requires some non-trivial work to compute.
          *
          * @return the resulting encoded string.
@@ -731,8 +731,8 @@ class Perm {
          * an invalid encoding (i.e., this routine will throw an exception).
          *
          * Tight encodings are fast to work with for small permutation classes
-         * (\a n &le; 7), but slower for larger permutation classes
-         * (8 &le; \a n &le; 16).  See tightEncoding() for further details.
+         * (\a n &le; 8), but slower for larger permutation classes
+         * (9 &le; \a n &le; 16).  See tightEncoding() for further details.
          *
          * \exception InvalidArgument the given string is not a tight encoding
          * of an <i>n</i>-element permutation.
@@ -755,8 +755,8 @@ class Perm {
          * whitespace.
          *
          * Tight encodings are fast to work with for small permutation classes
-         * (\a n &le; 7), but slower for larger permutation classes
-         * (8 &le; \a n &le; 16).  See tightEncoding() for further details.
+         * (\a n &le; 8), but slower for larger permutation classes
+         * (9 &le; \a n &le; 16).  See tightEncoding() for further details.
          *
          * \exception InvalidInput the given input stream does not begin with
          * a tight encoding of an <i>n</i>-element permutation.
@@ -898,6 +898,7 @@ template <> class Perm<4>;
 template <> class Perm<5>;
 template <> class Perm<6>;
 template <> class Perm<7>;
+template <> class Perm<8>;
 
 // Inline functions for Perm
 
@@ -1203,7 +1204,7 @@ Perm<n> Perm<n>::rand(bool even) {
 template <int n>
 template <class URBG>
 Perm<n> Perm<n>::rand(URBG&& gen, bool even) {
-    // Note: This generic implementation of Perm covers 8 <= n <= 16.
+    // Note: This generic implementation of Perm covers 9 <= n <= 16.
     // The corresponding index types require 16, 32 or 64 bits.
     //
     // A slight messiness here is that std::uniform_int_distribution

@@ -55,13 +55,14 @@
 #include "maths/spec/perm4.h"
 #include "maths/spec/perm5.h"
 #include "maths/spec/perm7.h"
+#include "maths/spec/perm8.h"
 
 namespace regina {
 
 template <int k>
 inline constexpr Perm<2> Perm<2>::contract(Perm<k> p) {
-    static_assert(k >= 8, "The generic implementation of Perm<2>::contract<k> "
-        "requires k >= 8.");
+    static_assert(k >= 9, "The generic implementation of Perm<2>::contract<k> "
+        "requires k >= 9.");
 
     return Perm<2>(static_cast<Code>(p.permCode() % 2 ? 1 : 0));
 }
@@ -89,6 +90,11 @@ inline constexpr Perm<2> Perm<2>::contract(Perm<6> p) {
 template <>
 inline constexpr Perm<2> Perm<2>::contract(Perm<7> p) {
     return Perm<2>(static_cast<Code>(p.permCode2() < 720 ? 0 : 1));
+}
+
+template <>
+inline constexpr Perm<2> Perm<2>::contract(Perm<8> p) {
+    return Perm<2>(static_cast<Code>(p.permCode2() < 5040 ? 0 : 1));
 }
 
 inline void Perm<2>::clear(unsigned from) {
@@ -297,6 +303,65 @@ inline void Perm<7>::clear(unsigned from) {
             break;
         case 5:
             if ((*this)[5] == 6)
+                code2_ = code2_ ^ 1;
+            break;
+        default:
+            break;
+    }
+}
+
+template <>
+inline constexpr Perm<8> Perm<8>::extend(Perm<2> p) {
+    return Perm<8>(static_cast<Code2>(p.permCode() == 0 ? 0 : 5041));
+}
+
+template <int k>
+inline constexpr Perm<8> Perm<8>::extend(Perm<k> p) {
+    static_assert(2 < k && k < 8,
+        "The generic implementation of Perm<8>::extend<k> requires 2 < k < 8.");
+
+    Perm<8> p8(static_cast<Code2>(p.SnIndex()));
+    // Now p8 acts on {(8-k),...,7} in the way that p acts on {0,...,(k-1)}.
+
+    // Since rot(k) can be evaluated at compile-time, we hope that the
+    // compiler actually does this.
+    return rot(k) * p8 * rot(8 - k);
+}
+
+template <int k>
+constexpr Perm<8> Perm<8>::contract(Perm<k> p) {
+    static_assert(k > 8, "Perm<8>::contract<k> requires k > 8.");
+
+    return Perm<8>(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]);
+}
+
+inline void Perm<8>::clear(unsigned from) {
+    switch (from) {
+        case 0:
+        case 1:
+            code2_ = 0;
+            break;
+        case 2:
+            // Test if 0 -> 0.
+            code2_ = (code2_ < 5040 ? 0 /* 01234567 */ : 5041 /* 10234567 */);
+            break;
+        case 3:
+            // When rounded down to the nearest multiple of 120,
+            // the code is the correct *ordered* S8 index.
+            code2_ = convOrderedUnordered<Code2>(code2_ - (code2_ % 120));
+            break;
+        case 4:
+            // When rounded down to the nearest multiple of 24,
+            // the code is the correct *ordered* S8 index.
+            code2_ = convOrderedUnordered<Code2>(code2_ - (code2_ % 24));
+            break;
+        case 5:
+            // When rounded down to the nearest multiple of 6,
+            // the code is the correct *ordered* S8 index.
+            code2_ = convOrderedUnordered<Code2>(code2_ - (code2_ % 6));
+            break;
+        case 6:
+            if ((*this)[6] == 7)
                 code2_ = code2_ ^ 1;
             break;
         default:

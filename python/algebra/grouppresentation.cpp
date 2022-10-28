@@ -174,9 +174,10 @@ void addGroupPresentation(pybind11::module_& m) {
                 case 5: p.enumerateCovers<5>(push); break;
                 case 6: p.enumerateCovers<6>(push); break;
                 case 7: p.enumerateCovers<7>(push); break;
+                case 8: p.enumerateCovers<8>(push); break;
                 default:
                     throw regina::InvalidArgument("The index passed to "
-                        "enumerateCovers() must be between 2 and 7 inclusive.");
+                        "enumerateCovers() must be between 2 and 8 inclusive.");
             }
             return ans;
         })
@@ -190,9 +191,10 @@ void addGroupPresentation(pybind11::module_& m) {
                 case 5: return p.enumerateCovers<5>(action);
                 case 6: return p.enumerateCovers<6>(action);
                 case 7: return p.enumerateCovers<7>(action);
+                case 8: return p.enumerateCovers<8>(action);
             }
             throw regina::InvalidArgument("The index passed to "
-                "enumerateCovers() must be between 2 and 7 inclusive.");
+                "enumerateCovers() must be between 2 and 8 inclusive.");
         })
         .def("enumerateCoversConcurrent", [](const GroupPresentation& p, int index,
                 int concurrentLayers, unsigned nThreads) {
@@ -213,9 +215,11 @@ void addGroupPresentation(pybind11::module_& m) {
                                 concurrentLayers, nThreads, push); break;
                 case 7: p.enumerateCoversConcurrent<7>(
                                 concurrentLayers, nThreads, push); break;
+                case 8: p.enumerateCoversConcurrent<8>(
+                                concurrentLayers, nThreads, push); break;
                 default:
                     throw regina::InvalidArgument("The index passed to "
-                        "enumerateCovers() must be between 2 and 7 inclusive.");
+                        "enumerateCovers() must be between 2 and 8 inclusive.");
             }
             return ans;
         })
@@ -236,9 +240,11 @@ void addGroupPresentation(pybind11::module_& m) {
                                 concurrentLayers, nThreads, action);
                 case 7: return p.enumerateCoversConcurrent<7>(
                                 concurrentLayers, nThreads, action);
+                case 8: return p.enumerateCoversConcurrent<8>(
+                                concurrentLayers, nThreads, action);
             }
             throw regina::InvalidArgument("The index passed to "
-                "enumerateCovers() must be between 2 and 7 inclusive.");
+                "enumerateCovers() must be between 2 and 8 inclusive.");
         })
         .def("incidence", &GroupPresentation::incidence)
         .def("tex", &GroupPresentation::tex)

@@ -70,7 +70,7 @@ void testPerm() {
     static_assert(Perm<n>().reverse() * Perm<n>().reverse() == Perm<n>());
     static_assert(Perm<n>::rot(1) * Perm<n>::rot(1) == Perm<n>::rot(2 % n));
 
-    if constexpr (n == 4 || n == 5 || n == 6) {
+    if constexpr (n == 4 || n == 5 || n == 6 || n == 8) {
         static_assert(Perm<n>::fromPermCode1(swap.permCode1()) == swap);
         static_assert(Perm<n>::isPermCode1(swap.permCode1()));
 
