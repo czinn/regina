@@ -354,5 +354,255 @@ Link Link::fromKnotSig(const std::string& sig) {
     return ans;
 }
 
+namespace {
+    inline size_t fastMod(size_t k, size_t n) {
+        if (k < n) return k;
+        return k - n;
+    }
+
+    struct FastSigData {
+        size_t crossingA;
+        size_t crossingB;
+        int strand;
+        int sign;
+
+        size_t effective_index(size_t start, size_t n) const {
+            return std::min(fastMod(crossingA + n - start, n), fastMod(crossingB + n - start, n));
+        }
+
+        int cmp(const FastSigData& rhs, size_t lstart, size_t rstart, size_t n) {
+            size_t effective_l = effective_index(lstart, n);
+            size_t effective_r = rhs.effective_index(rstart, n);
+            if (effective_l < effective_r) return -1;
+            if (effective_l > effective_r) return 1;
+            if (strand > rhs.strand) return -1; /* upper first */
+            if (strand < rhs.strand) return 1;
+            if (sign > rhs.sign) return -1; /* positive first */
+            if (sign < rhs.sign) return 1;
+            return 0;
+        }
+    };
+
+    // Returns 0 if circular slices were still equal after max_equalities comparisons, -x - 1 if a was lesser after x comparisons, and x + 1 if a was greater after x comparisons.
+    int circularCompare(FastSigData* a, size_t i, FastSigData* b, size_t j,
+            size_t n, size_t max_equalities) {
+        size_t astart = i;
+        size_t bstart = j;
+        for (size_t k = 0; k < max_equalities; k++) {
+            int comparison = a[i].cmp(b[j], astart, bstart, n);
+            if (comparison < 0) return -((int)k) - 1;
+            if (comparison > 0) return (int)k + 1;
+            ++i;
+            ++j;
+            if (i == n) i = 0;
+            if (j == n) j = 0;
+        }
+        return 0;
+    }
+}
+
+size_t minimumStartingPoint(FastSigData* a, size_t n) {
+    size_t halfN = n / 2;
+    size_t ceilHalfN = (n + 1) / 2;
+    size_t iMax = 0;
+    size_t jMax = halfN;
+    size_t alpha, beta;
+    while (true) {
+        if (iMax >= halfN) {
+            alpha = std::max(iMax, jMax);
+            beta = n;
+            break;
+        }
+        if (jMax >= n) {
+            alpha = std::max(iMax, jMax - n);
+            beta = halfN;
+            break;
+        }
+        int comparison = circularCompare(a, iMax, a, jMax, n, ceilHalfN);
+        if (comparison == 0) {
+            if (iMax == 0 || jMax == halfN) {
+                // q is even
+                return minimumStartingPoint(a, halfN);
+            }
+            size_t d = std::gcd(n, jMax - iMax);
+            size_t s = n - std::max(d, std::max(iMax + 1, jMax - halfN + 1));
+
+            comparison = circularCompare(a, iMax, a, jMax, n, s);
+            if (comparison == 0) {
+                if (s == n - d) {
+                    if (iMax >= jMax - halfN) {
+                        alpha = iMax;
+                        beta = d + 1;
+                    } else {
+                        alpha = jMax;
+                        beta = halfN + d + 1;
+                    }
+                } else {
+                    if (s == n - iMax - 1) {
+                        alpha = std::min(iMax, jMax - iMax);
+                        beta = halfN + 1;
+                    } else {
+                        alpha = std::min(jMax, iMax - jMax + halfN + n);
+                        beta = n;
+                    }
+                }
+                break;
+            } else if (comparison < 0) {
+                jMax += (size_t)(-comparison) - 1;
+            } else {
+                iMax += (size_t)comparison - 1;
+            }
+        } else if (comparison < 0) {
+            jMax += (size_t)(-comparison);
+        } else {
+            iMax += (size_t)comparison;
+        }
+    }
+
+    size_t gamma = alpha;
+    size_t delta = gamma + 1;
+    while (delta < beta) {
+        int comparison = circularCompare(a, gamma, a, delta, n, beta - gamma);
+        if (comparison > 0) {
+            gamma = std::max(delta, gamma + (size_t)comparison + 1);
+            delta = gamma + 1;
+        } else if (comparison < 0) {
+            delta += (size_t)(-comparison);
+        } else {
+            delta += beta - gamma + 1;
+        }
+    }
+
+    return gamma;
+}
+
+std::string Link::fastKnotSig(bool useReflection, bool useReverse) const {
+    // Only defined for knots at present.
+    if (components_.size() != 1)
+        throw NotImplemented(
+            "Knot signatures are only implemented for single-component links");
+    size_t n = crossings_.size();
+    
+    // Walk through the link once to construct the FastSigData objects
+    auto* curr = new FastSigData[2 * n];
+    auto* firstCrossing = new size_t[n];
+    std::fill(firstCrossing, firstCrossing + n, 2 * n);
+    auto strand = crossings_[0]->strand(0);
+    for (size_t i = 0; i < 2 * n; ++i) {
+        size_t crossing = strand.crossing()->index();
+        if (firstCrossing[crossing] == 2 * n) {
+            firstCrossing[crossing] = i;
+            curr[i] = FastSigData { i, 0, strand.strand(), strand.crossing()->sign() };
+        } else {
+            curr[i] = FastSigData { firstCrossing[crossing], i, strand.strand(), strand.crossing()->sign() };
+            curr[firstCrossing[crossing]].crossingB = i;
+        }
+        ++strand;
+    }
+    delete[] firstCrossing;
+
+    auto* best = new FastSigData[2 * n];
+    size_t bestStart = 0;
+
+    bool begin = true;
+    for (int reflectSign = 0; reflectSign < 2; ++reflectSign) {
+        for (int reflectStrands = 0; reflectStrands < 2; ++reflectStrands) {
+            for (int reverse = 0; reverse < 2; ++reverse) {
+                size_t start = minimumStartingPoint(curr, 2 * n);
+                if (begin || circularCompare(curr, start, best, bestStart, 2 * n, 2 * n) < 0) {
+                    begin = false;
+                    memcpy(best, curr, 2 * n * sizeof(FastSigData));
+                    bestStart = start;
+                }
+
+                if (!useReverse) {
+                    break;
+                }
+                if (reverse == 0) {
+                    for (size_t i = 0; i < 2 * n; ++i) {
+                        curr[i].crossingA = 2 * n - curr[i].crossingA;
+                        curr[i].crossingB = 2 * n - curr[i].crossingB;
+                    }
+                }
+            }
+            if (reflectStrands == 0) {
+                for (size_t i = 0; i < 2 * n; ++i) {
+                    curr[i].strand ^= 1;
+                }
+            }
+        }
+
+        if (!useReflection) {
+            break;
+        }
+        if (reflectSign == 0) {
+            for (size_t i = 0; i < 2 * n; ++i) {
+                curr[i].sign *= -1;
+            }
+        }
+    }
+
+    delete[] curr;
+    size_t* crossingMap = new size_t[2 * n];
+    std::fill(crossingMap, crossingMap + 2 * n, 2 * n);
+    size_t nextCrossing = 0;
+    size_t k = bestStart;
+    do {
+        if (crossingMap[best[k].crossingA] == 2 * n) {
+            crossingMap[best[k].crossingA] = nextCrossing++;
+        }
+        k++;
+        if (k == 2 * n) k = 0;
+    } while (k != bestStart);
+    assert(nextCrossing == n);
+
+    // Text: n c_1 c_2 ... c_2n [packed strand bits] [packed sign bits]
+    std::string ans;
+
+    // Output chars per crossing index, if this is > 1.
+    unsigned charsPerInt;
+    if (n < 63)
+        charsPerInt = 1;
+    else {
+        charsPerInt = 0;
+        size_t tmp = n;
+        while (tmp > 0) {
+            tmp >>= 6;
+            ++charsPerInt;
+        }
+        ans = Base64SigEncoding::encodeSingle(63);
+        ans += Base64SigEncoding::encodeSingle(charsPerInt);
+    }
+
+    // Output crossings in order.
+    Base64SigEncoding::encodeInt(ans, n, charsPerInt);
+    for (auto dat = best + bestStart; dat != best + 2*n; ++dat)
+        Base64SigEncoding::encodeInt(ans, crossingMap[dat->crossingA], charsPerInt);
+    for (auto dat = best; dat != best + bestStart; ++dat)
+        Base64SigEncoding::encodeInt(ans, crossingMap[dat->crossingA], charsPerInt);
+
+    // Output strands and signs, each as a packed sequence of bits.
+    unsigned i, j;
+    unsigned write;
+    for (i = 0; i < 2 * n; i += 6) {
+        write = 0;
+        for (j = 0; j < 6 && i + j < 2 * n; ++j)
+            if (best[fastMod(bestStart + i + j, 2 * n)].strand)
+                write |= (1 << j);
+        ans += Base64SigEncoding::encodeSingle(write);
+    }
+    for (i = 0; i < 2 * n; i += 6) {
+        write = 0;
+        for (j = 0; j < 6 && i + j < 2 * n; ++j)
+            if (best[fastMod(bestStart + i + j, 2 * n)].sign > 0)
+                write |= (1 << j);
+        ans += Base64SigEncoding::encodeSingle(write);
+    }
+
+    delete[] best;
+    delete[] crossingMap;
+    return ans;
+}
+
 } // namespace regina
 

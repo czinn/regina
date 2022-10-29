@@ -3397,6 +3397,12 @@ class Link :
             const;
 
         /**
+         * TODO czinn: Document
+         */
+        std::string fastKnotSig(bool useReflection = true, bool useReversal = true)
+            const;
+
+        /**
          * Writes the tight encoding of this link to the given output stream.
          * See the page on \ref tight "tight encodings" for details.
          *

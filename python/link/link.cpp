@@ -255,6 +255,9 @@ void addLink(pybind11::module_& m) {
         .def("knotSig", &Link::knotSig,
             pybind11::arg("useReflection") = true,
             pybind11::arg("useReversal") = true)
+        .def("fastKnotSig", &Link::fastKnotSig,
+            pybind11::arg("useReflection") = true,
+            pybind11::arg("useReversal") = true)
         .def("dumpConstruction", &Link::dumpConstruction)
         .def("r1", overload_cast<Crossing*, bool, bool>(&Link::r1),
             pybind11::arg(),
